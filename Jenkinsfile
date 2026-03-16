@@ -30,10 +30,16 @@ pipeline {
             steps {
                 script {
                     echo "Testing if the container runs..."
-                    // Start the container, wait a moment, and ensure it is up
+                    // Clean up any leftover container from previous builds
+                    sh "docker rm -f temp-test-${TAG} || true"
+                    // Start the container and verify it runs
                     sh """
                         docker run -d --name temp-test-${TAG} -p 5000:5000 ${DOCKER_HUB_USER}/${DOCKER_IMAGE}:${TAG}
+                        sleep 5
+                        docker ps | grep temp-test-${TAG}
                     """
+                    // Clean up test container
+                    sh "docker rm -f temp-test-${TAG} || true"
                 }
             }
         }
