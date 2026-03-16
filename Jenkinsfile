@@ -1,59 +1,75 @@
 pipeline {
     agent any
 
+    // Environment variables
     environment {
-        DOCKERHUB_USERNAME = '2023bcs0058karthikdasp'
-        IMAGE_NAME = '2023bcs0058karthikdasp/2023bcs0058'
-        DOCKERHUB_CREDENTIALS = credentials('dockerhub-credentials')
+        DOCKER_IMAGE = '2023bcs0058'
+        DOCKER_CREDS_ID = 'dockerhub-credentials'
+        DOCKER_HUB_USER = '2023bcs0058karthikdasp'
+        TAG = "${env.BUILD_NUMBER}"
     }
 
     stages {
-        stage('Checkout Source Code') {
+        stage('Checkout') {
             steps {
-                echo 'Checking out source code from GitHub...'
+                // Checkout the SCM automatically
                 checkout scm
             }
         }
 
         stage('Build Docker Image') {
             steps {
-                echo 'Building Docker image...'
-                sh "docker build -t ${IMAGE_NAME}:latest ."
+                script {
+                    echo "Building Docker Image: ${DOCKER_HUB_USER}/${DOCKER_IMAGE}:${TAG}..."
+                    sh "docker build -t ${DOCKER_HUB_USER}/${DOCKER_IMAGE}:${TAG} -t ${DOCKER_HUB_USER}/${DOCKER_IMAGE}:latest ."
+                }
             }
         }
 
-        stage('Tag Docker Image') {
+        stage('Test Docker Image') {
             steps {
-                echo 'Tagging Docker image...'
-                sh "docker tag ${IMAGE_NAME}:latest ${IMAGE_NAME}:${BUILD_NUMBER}"
-            }
-        }
-
-        stage('Login to Docker Hub') {
-            steps {
-                echo 'Logging in to Docker Hub...'
-                sh "echo ${DOCKERHUB_CREDENTIALS_PSW} | docker login -u ${DOCKERHUB_CREDENTIALS_USR} --password-stdin"
+                script {
+                    echo "Testing if the container runs..."
+                    // Start the container, wait a moment, and ensure it is up
+                    sh """
+                        docker run -d --name temp-test-${TAG} -p 5000:5000 ${DOCKER_HUB_USER}/${DOCKER_IMAGE}:${TAG}
+                    """
+                }
             }
         }
 
         stage('Push Docker Image') {
             steps {
-                echo 'Pushing Docker image to Docker Hub...'
-                sh "docker push ${IMAGE_NAME}:latest"
-                sh "docker push ${IMAGE_NAME}:${BUILD_NUMBER}"
+                script {
+                    echo "Pushing Docker Image to Docker Hub..."
+
+                    withCredentials([usernamePassword(credentialsId: env.DOCKER_CREDS_ID, usernameVariable: 'DOCKER_HUB_USER', passwordVariable: 'DOCKERHUB_PASS')]) {
+                        sh """
+                            echo \$DOCKERHUB_PASS | docker login -u ${DOCKER_HUB_USER} --password-stdin
+                            docker push ${DOCKER_HUB_USER}/${DOCKER_IMAGE}:${TAG}
+                            docker push ${DOCKER_HUB_USER}/${DOCKER_IMAGE}:latest
+                            docker logout
+                        """
+                    }
+                }
             }
         }
     }
 
     post {
         always {
-            sh 'docker logout'
+            echo "Pipeline finished."
+            // Clean up workspace
+            cleanWs()
+            // Clean up local images
+            sh "docker rmi ${DOCKER_HUB_USER}/${DOCKER_IMAGE}:${TAG} || true"
+            sh "docker rmi ${DOCKER_HUB_USER}/${DOCKER_IMAGE}:latest || true"
         }
         success {
-            echo 'Pipeline completed successfully! Image pushed to Docker Hub.'
+            echo "Build and Push was successful!"
         }
         failure {
-            echo 'Pipeline failed. Please check the logs.'
+            echo "Build or Push failed."
         }
     }
 }
